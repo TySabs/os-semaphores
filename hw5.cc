@@ -10,6 +10,7 @@
 #include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 using std::cerr;
 using std::endl;
@@ -23,26 +24,31 @@ const int C_STEPS = 6;
 int COUNTER = 0;
 sem_t NOT_FULL;
 sem_t NOT_EMPTY;
+pthread_mutex_t lock;
 
-int insert(void *tid) {
-  sem_wait(&NOT_FULL);
+
+int insert_widget(void *tid) {
+  pthread_mutex_lock(&lock);
   COUNTER++;
-  cerr << "Inserting to counter. Now at: " << COUNTER << endl;
-  sem_post(&NOT_FULL);
+  cerr << "Producer " << (long) tid << " inserted one item. Total is now " << COUNTER << endl;
+  pthread_mutex_unlock(&lock);
   return 0;
 }
 
-int remove(void *tid) {
-  sem_wait(&NOT_EMPTY);
+int remove_widget(void *tid) {
+  pthread_mutex_lock(&lock);
   COUNTER--;
-  cerr << "Removing from counter. Now at: " << COUNTER << endl;
-  sem_post(&NOT_EMPTY);
+  cerr << "Consumer " << (long) tid << " removed one item. Total is now " << COUNTER << endl;
+  pthread_mutex_unlock(&lock);
   return 0;
 }
 
 void *produce(void *tid) {
   for (int i = 0; i < P_STEPS; i++) {
-    insert(tid);
+    sem_wait(&NOT_FULL);
+    insert_widget(tid);
+    sleep(1);
+    sem_post(&NOT_EMPTY);
   }
 
   pthread_exit(0);
@@ -51,33 +57,54 @@ void *produce(void *tid) {
 
 void *consume(void *tid) {
   for (int i = 0; i < C_STEPS; i++) {
-    remove(tid);
+    sem_wait(&NOT_EMPTY);
+    remove_widget(tid);
+    sleep(1);
+    sem_post(&NOT_FULL);
   }
 
+  pthread_exit(0);
   return NULL;
 }
 
 int main (int argc, char *argv[]) {
-  pthread_t threads[5];
-  int createCode;
-  long i;
+  pthread_t threads[6];
+  int insertCode, removeCode;
 
   cerr << "Simulation of Producers and Consumers" << endl << endl;
 
   sem_init(&NOT_FULL, 0, BUFFER_SIZE);
   sem_init(&NOT_EMPTY, 0, 0);
+  pthread_mutex_init(&lock, NULL);
 
-  for (i = 0; i < 5; i++) {
-    createCode = pthread_create(&threads[i], NULL, produce, (void *) i);
-    if (createCode) {
-      printf("ERROR! return code from pthread_create() is %d\n", createCode);
+  for (long i = 0; i < P_NUMBER; i++) {
+    insertCode = pthread_create(&threads[i], NULL, produce, (void *) i);
+    if (insertCode) {
+      printf("ERROR! return code from pthread_create() is %d\n", insertCode);
       exit(-1);
     }
   }
 
-  for (i = 0; i < 5; i++) {
+  for (long i = 0; i < C_NUMBER; i++) {
+    removeCode = pthread_create(&threads[i], NULL, consume, (void *) i);
+    if (removeCode) {
+      printf("ERROR! return code from pthread_create() is %d\n", removeCode);
+      exit(-1);
+    }
+  }
+
+  for (int i = 0; i < 5; i++) {
     pthread_join(threads[i], NULL);
   }
 
- pthread_exit(NULL);
+  cerr << endl << "All the producer and consumer threads have been closed." << endl << endl;
+
+
+  pthread_mutex_destroy(&lock);
+  sem_destroy(&NOT_FULL);
+  sem_destroy(&NOT_EMPTY);
+
+  cerr << "The semaphores and mutex have been deleted." << endl;
+
+  pthread_exit(NULL);
 }
